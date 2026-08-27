@@ -26,6 +26,8 @@ def generate_values(meta: Dict[str, Any]) -> Dict[str, Any]:
     cloudflare_secret = meta.get("cloudflareSecret", "cloudflare-api-token")
     node_count = meta.get("nodeCount", 1)
     custom_components = meta.get("components", {})
+    oidc = meta.get("oidc", {})
+    wildcard_tls_secret = meta.get("wildcardTLSSecret", "")
 
     # Calculate longhorn replicaCount = min(nodeCount, 3)
     longhorn_replicas = min(max(int(node_count), 1), 3)
@@ -96,6 +98,36 @@ def generate_values(meta: Dict[str, Any]) -> Dict[str, Any]:
             "cnpg-operator": {
                 "enabled": custom_components.get("cnpg-operator", False),
                 "values": {}
+            },
+            "vault": {
+                "enabled": custom_components.get("vault", False),
+                "values": {
+                    "server": {
+                        "ha": {"enabled": False},
+                        "ingress": {
+                            "enabled": True,
+                            "ingressClassName": "nginx",
+                            "hosts": [
+                                {
+                                    "host": f"vault.{domain}" if domain else "",
+                                    "paths": ["/"]
+                                }
+                            ],
+                            "tls": [
+                                {
+                                    "secretName": wildcard_tls_secret,
+                                    "hosts": [f"vault.{domain}" if domain else ""]
+                                }
+                            ]
+                        }
+                    },
+                    "ui": {"enabled": True},
+                    "oidc": {
+                        "issuerURL": oidc.get("vaultIssuerURL", ""),
+                        "clientID": oidc.get("vaultClientID", ""),
+                        "clientSecretRef": oidc.get("vaultClientSecretRef", "vault-oidc-secret")
+                    }
+                }
             }
         }
     }

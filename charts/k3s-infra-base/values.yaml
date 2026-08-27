@@ -67,3 +67,32 @@ components:
       - ServerSideApply=true
       - CreateNamespace=true
     values: {}
+  vault:
+    enabled: false
+    chart:
+      repoURL: https://helm.releases.hashicorp.com
+      chart: vault
+      targetRevision: 0.28.1
+    namespace: vault
+    syncWave: "4"
+    values:
+      server:
+        ha:
+          enabled: false
+        ingress:
+          enabled: true
+          ingressClassName: nginx
+          hosts:
+            - host: ""                        # 오버라이드: vault.<domain>
+              paths:
+                - /
+          tls:
+            - secretName: ""                  # 오버라이드: wildcard TLS secret
+              hosts:
+                - ""
+      ui:
+        enabled: true
+      oidc:
+        issuerURL: ""                         # 오버라이드: Authentik OIDC issuer URL
+        clientID: ""                          # 오버라이드: Vault OIDC Client ID
+        clientSecretRef: ""                   # 오버라이드: K8s Secret name for client secret

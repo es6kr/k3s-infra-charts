@@ -1,3 +1,6 @@
+__pycache__/
+.worktrees/
+
 # Local environment overrides
 .env.local
 .actrc.local
