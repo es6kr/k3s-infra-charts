@@ -15,10 +15,12 @@ package:
 lint:
 	helm lint charts/host-ip-service
 	helm lint charts/cluster-issuers
+	helm lint charts/openclaw-agent
 
 # Run unit tests
 unittest:
 	helm unittest charts/host-ip-service
+	helm unittest charts/openclaw-agent
 
 # Template charts for validation
 template:
@@ -28,6 +30,7 @@ template:
 		--set endpoint.ip=10.0.0.1 \
 		--set 'endpoint.ports[0].name=http' \
 		--set 'endpoint.ports[0].port=80'
+	helm template test-release charts/openclaw-agent
 
 # Run all tests
 test: lint unittest template

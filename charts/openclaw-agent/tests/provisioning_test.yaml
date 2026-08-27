@@ -1,0 +1,58 @@
+suite: openclaw-agent provisioning
+templates:
+  - statefulset.yaml
+  - configmap.yaml
+tests:
+  - it: does not render secret values in plaintext anywhere in the manifests
+    templates:
+      - statefulset.yaml
+      - configmap.yaml
+    asserts:
+      - notMatchRegexRaw:
+          pattern: "654ae93b5b7b8d8b2a0803b85569180310bb1817578e294c"
+      - notMatchRegexRaw:
+          pattern: "MTUyNzY1NDAzNjExODE3NTg5NQ"
+
+  - it: init container pulls secrets via envFrom, not inline values
+    template: statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].envFrom[0].secretRef.name
+          value: openclaw-dgs-secrets
+
+  - it: both agents render in the config template
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["openclaw.json.tmpl"]
+          pattern: "wiki-ask-claude"
+      - matchRegex:
+          path: data["openclaw.json.tmpl"]
+          pattern: "\"id\": \"wiki-ask\""
+
+  - it: second (claude) agent's discord binding requires mention, first does not
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["openclaw.json.tmpl"]
+          pattern: '(?s)"dgs-claude".*?"requireMention": true'
+      - matchRegex:
+          path: data["openclaw.json.tmpl"]
+          pattern: '(?s)"dgs-openclaw".*?"requireMention": false'
+
+  - it: provisioning is a stamp-gated no-op when nothing changed (script contains the skip guard)
+    template: statefulset.yaml
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].args[0]
+          pattern: "provision stamp unchanged"
+
+  - it: image stays the unmodified upstream repository/tag
+    template: statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/openclaw/openclaw:2026.7.1
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: ghcr.io/openclaw/openclaw:2026.7.1
