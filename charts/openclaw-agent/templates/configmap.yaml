@@ -1,0 +1,115 @@
+{{- if not .Values.agents }}
+{{- fail "openclaw-agent: .Values.agents must contain at least one agent" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "openclaw-agent.name" . }}-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "openclaw-agent.labels" . | nindent 4 }}
+data:
+  # __*__ placeholders are substituted by the init container from Secret-sourced
+  # env vars (see _helpers.tpl "initScript") — never filled in here.
+  openclaw.json.tmpl: |
+    {
+      "gateway": {
+        "port": {{ .Values.gateway.port }},
+        "mode": "local",
+        "bind": {{ .Values.gateway.bind | quote }},
+        "auth": {
+          "mode": "token",
+          "token": "__GATEWAY_TOKEN__"
+        },
+        "controlUi": {
+          "allowedOrigins": ["http://localhost:{{ .Values.gateway.port }}", "http://127.0.0.1:{{ .Values.gateway.port }}"]
+        }
+      },
+      "commands": {
+        "ownerAllowFrom": [{{ range $i, $id := .Values.ownerAllowFrom }}{{ if $i }}, {{ end }}{{ $id | quote }}{{ end }}],
+        "native": "auto",
+        "nativeSkills": "auto",
+        "restart": true
+      },
+      "plugins": {
+        "entries": {
+          "discord": { "enabled": true },
+          "codex": { "enabled": true },
+          "openai": { "enabled": true },
+          "acpx": { "enabled": true }
+        }
+      },
+      "channels": {
+        "discord": {
+          "enabled": true,
+          "groupPolicy": "open",
+          "dmPolicy": "open",
+          "allowFrom": ["*"],
+          "accounts": {
+            {{- $guildId := .Values.discord.guildId }}
+            {{- $agentsByAccount := dict }}
+            {{- range .Values.agents }}
+            {{- $_ := set $agentsByAccount .discord.accountId . }}
+            {{- end }}
+            {{- $accountNames := keys .Values.discord.accounts | sortAlpha }}
+            {{- range $i, $accountName := $accountNames }}
+            {{- if $i }},{{ end }}
+            {{- $agent := get $agentsByAccount $accountName }}
+            {{- if not $agent }}
+            {{- fail (printf "openclaw-agent: discord.accounts has %q but no agent uses it as discord.accountId" $accountName) }}
+            {{- end }}
+            {{ $accountName | quote }}: {
+              "name": {{ $accountName | quote }},
+              "enabled": true,
+              "token": "__DISCORD_TOKEN_{{ $accountName | upper | replace "-" "_" }}__",
+              "allowFrom": ["*"],
+              "guilds": {
+                {{ $guildId | quote }}: {
+                  "channels": {
+                    {{ $agent.discord.channelId | quote }}: {
+                      "enabled": true,
+                      "requireMention": {{ $agent.discord.requireMention }}
+                    }
+                  }
+                }
+              }
+            }
+            {{- end }}
+          }
+        }
+      },
+      "agents": {
+        "defaults": {
+          "model": { "primary": {{ (index .Values.agents 0).model | quote }} },
+          "workspace": "/home/node/.openclaw/workspace"
+        },
+        "list": [
+          {{- range $i, $agent := .Values.agents }}
+          {{- if $i }},{{ end }}
+          {
+            "id": {{ $agent.id | quote }},
+            "model": {
+              "primary": {{ $agent.model | quote }}
+              {{- if $agent.fallback }},
+              "fallback": [{{ range $j, $f := $agent.fallback }}{{ if $j }}, {{ end }}{{ $f | quote }}{{ end }}]
+              {{- end }}
+            }
+          }
+          {{- end }}
+        ]
+      },
+      "bindings": [
+        {{- range $i, $agent := .Values.agents }}
+        {{- if $i }},{{ end }}
+        {
+          "type": "route",
+          "agentId": {{ $agent.id | quote }},
+          "match": {
+            "channel": "discord",
+            "accountId": {{ $agent.discord.accountId | quote }},
+            "peer": { "kind": "channel", "id": {{ $agent.discord.channelId | quote }} }
+          }
+        }
+        {{- end }}
+      ]
+    }

@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "openclaw-agent.name" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "openclaw-agent.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  serviceName: {{ include "openclaw-agent.name" . }}
+  selector:
+    matchLabels:
+      {{- include "openclaw-agent.labels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "openclaw-agent.labels" . | nindent 8 }}
+    spec:
+      initContainers:
+        - name: provision
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - {{ include "openclaw-agent.initScript" . | quote }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.existingSecret }}
+          volumeMounts:
+            - name: data
+              mountPath: /home/node/.openclaw
+            - name: config
+              mountPath: /config
+      containers:
+        - name: openclaw
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - node
+            - /app/dist/index.js
+            - gateway
+            - --port
+            - {{ .Values.gateway.port | quote }}
+            - --bind
+            - {{ .Values.gateway.bind | quote }}
+          env:
+            - name: PATH
+              value: "/home/node/.openclaw/runtime/node_modules/.bin:/usr/local/bin:/usr/bin:/bin"
+          ports:
+            - name: http
+              containerPort: {{ .Values.gateway.port }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /home/node/.openclaw
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "openclaw-agent.name" . }}-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ .Values.persistence.storageClassName }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}

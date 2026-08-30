@@ -1,0 +1,5 @@
+apiVersion: v2
+description: Helm chart for openclaw Discord agent(s) — upstream image + runtime-provisioned model providers via initContainer, config/secrets injected as Kubernetes resources instead of baked into the pod command.
+name: openclaw-agent
+type: application
+version: 0.1.0

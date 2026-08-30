@@ -1,0 +1,175 @@
+suite: openclaw-agent provisioning
+templates:
+  - statefulset.yaml
+  - configmap.yaml
+tests:
+  - it: does not render secret values in plaintext anywhere in the manifests
+    templates:
+      - statefulset.yaml
+      - configmap.yaml
+    asserts:
+      - notMatchRegexRaw:
+          pattern: "654ae93b5b7b8d8b2a0803b85569180310bb1817578e294c"
+      - notMatchRegexRaw:
+          pattern: "MTUyNzY1NDAzNjExODE3NTg5NQ"
+
+  - it: init container pulls secrets via envFrom, not inline values
+    template: statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].envFrom[0].secretRef.name
+          value: openclaw-dgs-secrets
+
+  - it: both agents render in the config template
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["openclaw.json.tmpl"]
+          pattern: "wiki-ask-claude"
+      - matchRegex:
+          path: data["openclaw.json.tmpl"]
+          pattern: "\"id\": \"wiki-ask\""
+
+  - it: second (claude) agent's discord binding requires mention, first does not
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["openclaw.json.tmpl"]
+          pattern: '(?s)"dgs-claude".*?"requireMention": true'
+      - matchRegex:
+          path: data["openclaw.json.tmpl"]
+          pattern: '(?s)"dgs-openclaw".*?"requireMention": false'
+
+  - it: the package install is a stamp-gated no-op when nothing changed (script contains the skip guard)
+    template: statefulset.yaml
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].args[0]
+          pattern: "package stamp unchanged"
+
+  - it: image stays the unmodified upstream repository/tag
+    template: statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/openclaw/openclaw:2026.7.1
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: ghcr.io/openclaw/openclaw:2026.7.1
+
+  - it: owner commands are not granted to everyone (no wildcard in ownerAllowFrom)
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["openclaw.json.tmpl"]
+          pattern: '"ownerAllowFrom": \["000000000000000000"\]'
+      - notMatchRegex:
+          path: data["openclaw.json.tmpl"]
+          pattern: '"ownerAllowFrom": \[[^]]*"\*"'
+
+  - it: an empty ownerAllowFrom still renders a well-formed array
+    template: configmap.yaml
+    set:
+      ownerAllowFrom: []
+    asserts:
+      - matchRegex:
+          path: data["openclaw.json.tmpl"]
+          pattern: '"ownerAllowFrom": \[\]'
+
+  - it: every configured discord account gets a token placeholder, including a third one
+    template: configmap.yaml
+    set:
+      discord:
+        guildId: "000000000000000002"
+        accounts:
+          dgs-openclaw:
+            enabled: true
+          dgs-claude:
+            enabled: true
+          dgs-third:
+            enabled: true
+      agents:
+        - id: wiki-ask
+          model: openai/gpt-5.5
+          discord: { accountId: dgs-openclaw, channelId: "1", requireMention: false }
+        - id: wiki-ask-claude
+          model: claude-cli/claude-sonnet-5
+          discord: { accountId: dgs-claude, channelId: "1", requireMention: true }
+        - id: wiki-ask-third
+          model: openai/gpt-5.5
+          discord: { accountId: dgs-third, channelId: "1", requireMention: false }
+    asserts:
+      - matchRegex:
+          path: data["openclaw.json.tmpl"]
+          pattern: "__DISCORD_TOKEN_DGS_THIRD__"
+
+  - it: the init script resolves placeholders generically, not by hardcoded account name
+    template: statefulset.yaml
+    asserts:
+      # the substitution is driven by a regex over __NAME__, so a new account needs no template change
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].args[0]
+          pattern: '__\(\[A-Z0-9_\]\+\)__'
+      - notMatchRegex:
+          path: spec.template.spec.initContainers[0].args[0]
+          pattern: "s#__DISCORD_TOKEN_DGS_OPENCLAW__#"
+
+  - it: account ordering is deterministic (sorted), so re-renders do not churn
+    template: configmap.yaml
+    asserts:
+      # "keys" alone is unordered in Go, so this ordering only holds because of sortAlpha;
+      # before that, repeated renders emitted the two accounts in either order.
+      - matchRegex:
+          path: data["openclaw.json.tmpl"]
+          pattern: '(?s)"dgs-claude".*"dgs-openclaw"'
+
+  - it: config is rendered on every start, gated separately from the package install
+    template: statefulset.yaml
+    asserts:
+      # only the npm install is stamp-gated ...
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].args[0]
+          pattern: "package stamp unchanged"
+      # ... and the render runs unconditionally so a rotated secret takes effect
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].args[0]
+          pattern: "rendering openclaw.json from the current secret environment"
+
+  - it: image.pullPolicy reaches both containers
+    template: statefulset.yaml
+    set:
+      image:
+        repository: ghcr.io/openclaw/openclaw
+        tag: "2026.7.1"
+        pullPolicy: Always
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].imagePullPolicy
+          value: Always
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: Always
+
+  - it: an empty agents list fails the render with a clear message
+    template: configmap.yaml
+    set:
+      agents: []
+    asserts:
+      - failedTemplate:
+          errorMessage: "openclaw-agent: .Values.agents must contain at least one agent"
+
+  - it: a discord account with no matching agent names the offender
+    template: configmap.yaml
+    set:
+      discord:
+        guildId: "000000000000000002"
+        accounts:
+          dgs-openclaw:
+            enabled: true
+          dgs-claude:
+            enabled: true
+          orphan-account:
+            enabled: true
+    asserts:
+      - failedTemplate:
+          errorMessage: 'openclaw-agent: discord.accounts has "orphan-account" but no agent uses it as discord.accountId'

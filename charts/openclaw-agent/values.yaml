@@ -1,0 +1,68 @@
+namespace: wiki
+
+image:
+  repository: ghcr.io/openclaw/openclaw
+  tag: "2026.7.1"          # upstream, unmodified — not a custom image
+  pullPolicy: IfNotPresent
+
+persistence:
+  storageClassName: local-path
+  size: 2Gi
+
+gateway:
+  port: 18789
+  bind: lan
+
+# Runtime-installed model-provider dependencies (installed into the PVC by the
+# init container, not baked into the image). Pin versions to avoid drift.
+runtimePackages:
+  - "@openclaw/acpx@2026.7.1"
+  - "@anthropic-ai/claude-code@2.1.246"
+
+# commands.ownerAllowFrom — Discord user IDs allowed to run owner-level commands.
+# Example placeholder — override with the real snowflake ID via a values file
+# kept out of this repo (not a credential, but still deployment-identifying).
+ownerAllowFrom:
+  - "000000000000000000"
+
+agents:
+  - id: wiki-ask
+    model: openai/gpt-5.5
+    fallback:
+      - claude-cli/claude-sonnet-5
+    discord:
+      accountId: dgs-openclaw
+      channelId: "000000000000000001"  # example placeholder — override per deployment
+      requireMention: false
+  - id: wiki-ask-claude
+    model: claude-cli/claude-sonnet-5
+    fallback:
+      - openai/gpt-5.5
+    discord:
+      accountId: dgs-claude
+      channelId: "000000000000000001"  # example placeholder — override per deployment
+      requireMention: true
+
+discord:
+  guildId: "000000000000000002"  # example placeholder — override per deployment
+  accounts:
+    dgs-openclaw:
+      enabled: true
+    dgs-claude:
+      enabled: true
+
+# Secret keys expected inside existingSecret (all token/credential values —
+# never set these directly in values.yaml or a values override committed to git):
+#   GATEWAY_TOKEN
+#   DISCORD_TOKEN_DGS_OPENCLAW
+#   DISCORD_TOKEN_DGS_CLAUDE
+#   ANTHROPIC_SETUP_TOKEN   (sk-ant-oat01-... from `claude setup-token`)
+existingSecret: openclaw-dgs-secrets
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    cpu: "1000m"
+    memory: 1536Mi

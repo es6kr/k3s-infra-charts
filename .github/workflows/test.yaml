@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main, master]
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -21,6 +24,7 @@ jobs:
         run: |
           helm lint charts/host-ip-service
           helm lint charts/cluster-issuers
+          helm lint charts/openclaw-agent
 
   unittest:
     runs-on: ubuntu-latest
@@ -36,7 +40,9 @@ jobs:
         run: helm plugin install https://github.com/helm-unittest/helm-unittest.git --version v0.5.2
 
       - name: Run unit tests
-        run: helm unittest charts/host-ip-service
+        run: |
+          helm unittest charts/host-ip-service
+          helm unittest charts/openclaw-agent
 
   template:
     runs-on: ubuntu-latest
@@ -56,3 +62,6 @@ jobs:
             --set endpoint.ip=10.0.0.1 \
             --set 'endpoint.ports[0].name=http' \
             --set 'endpoint.ports[0].port=80'
+
+      - name: Template openclaw-agent chart
+        run: helm template test-release charts/openclaw-agent
