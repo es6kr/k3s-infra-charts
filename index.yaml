@@ -125,4 +125,16 @@ entries:
     urls:
     - https://github.com/es6kr/k3s-infra-charts/releases/download/k3s-infra-base-0.1.0/k3s-infra-base-0.1.0.tgz
     version: 0.1.0
-generated: "2026-07-29T04:13:28.857335864Z"
+  openclaw-agent:
+  - apiVersion: v2
+    created: "2026-08-30T22:41:42.78087279Z"
+    description: Helm chart for openclaw Discord agent(s) — upstream image + runtime-provisioned
+      model providers via initContainer, config/secrets injected as Kubernetes resources
+      instead of baked into the pod command.
+    digest: aa68df5a20c1f32744a7fb5c219b7ade0bf729d2bb543c33b87e17712d9bb183
+    name: openclaw-agent
+    type: application
+    urls:
+    - https://github.com/es6kr/k3s-infra-charts/releases/download/openclaw-agent-0.1.0/openclaw-agent-0.1.0.tgz
+    version: 0.1.0
+generated: "2026-08-30T22:41:42.78089416Z"
