@@ -15,10 +15,13 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 
 {{/*
-Deterministic hash over everything that requires a re-provision when changed:
-runtime package pins + the rendered agents/discord config. Used as the PVC
-stamp-file comparison value so a warm pod restart skips both the npm install
-and the config overwrite unless one of these inputs actually changed.
+Deterministic hash over everything that requires a package re-install when
+changed: runtime package pins + the rendered agents/discord config. Used as the
+PVC stamp-file comparison value so a warm pod restart skips the npm install
+unless one of these inputs actually changed.
+
+Note this covers chart values only — it cannot observe Secret contents, which is
+why the config render is NOT gated on it (see "initScript" below).
 */}}
 {{- define "openclaw-agent.configHash" -}}
 {{- $input := dict "runtimePackages" .Values.runtimePackages "agents" .Values.agents "discord" .Values.discord "gateway" .Values.gateway "ownerAllowFrom" .Values.ownerAllowFrom -}}
@@ -27,10 +30,19 @@ and the config overwrite unless one of these inputs actually changed.
 
 {{/*
 Init-container script: idempotent runtime provisioning.
-Installs pinned model-provider packages into the PVC (skipped on a warm
-restart via the stamp file) and renders openclaw.json from the ConfigMap
-template with secret values substituted from env vars — never written to
-the ConfigMap or to values.yaml in plaintext.
+
+Two independent concerns, deliberately gated separately:
+  * package install  — expensive, gated on the stamp file (skipped on a warm restart)
+  * config render    — cheap, ALWAYS re-run so a rotated Secret takes effect
+
+The stamp hashes chart values only; it cannot see Secret contents, so gating the
+config render on it would leave a restarted pod serving credentials that were
+rotated out from under it.
+
+Secret values are substituted with a node pass rather than `sed`: it JSON-escapes
+each value (an unescaped `&` in a sed replacement expands to the matched text and
+silently corrupts the token) and resolves every `__NAME__` placeholder the
+ConfigMap emits, including accounts added after this chart was written.
 */}}
 {{- define "openclaw-agent.initScript" -}}
 set -eu
@@ -38,27 +50,42 @@ STAMP=/home/node/.openclaw/.provision-stamp
 WANT="{{ include "openclaw-agent.configHash" . }}"
 RUNTIME_DIR=/home/node/.openclaw/runtime
 
+mkdir -p /home/node/.openclaw
+
 CURRENT="$(cat "$STAMP" 2>/dev/null || true)"
 if [ "$CURRENT" = "$WANT" ]; then
-  echo "openclaw-agent: provision stamp unchanged ($WANT) — skipping npm install + config write"
-  exit 0
+  echo "openclaw-agent: package stamp unchanged ($WANT) — skipping npm install"
+else
+  echo "openclaw-agent: installing runtime packages (stamp $CURRENT -> $WANT)"
+  mkdir -p "$RUNTIME_DIR"
+  npm install --prefix "$RUNTIME_DIR" {{ .Values.runtimePackages | join " " }}
 fi
 
-echo "openclaw-agent: provisioning (stamp $CURRENT -> $WANT)"
+# Always rendered from the CURRENT Secret environment — never stamp-gated.
+echo "openclaw-agent: rendering openclaw.json from the current secret environment"
+node -e '
+const fs = require("fs");
+const src = fs.readFileSync("/config/openclaw.json.tmpl", "utf8");
+const missing = [];
+const out = src.replace(/__([A-Z0-9_]+)__/g, function (match, name) {
+  const value = process.env[name];
+  if (value === undefined || value === "") {
+    missing.push(name);
+    return match;
+  }
+  // JSON-escape, then strip the surrounding quotes the template already supplies.
+  return JSON.stringify(value).slice(1, -1);
+});
+if (missing.length) {
+  throw new Error("openclaw-agent: no secret value for placeholder(s): " + missing.join(", "));
+}
+JSON.parse(out); // fail loudly here rather than at gateway startup
+fs.writeFileSync("/home/node/.openclaw/openclaw.json", out);
+'
 
-mkdir -p "$RUNTIME_DIR"
-npm install --prefix "$RUNTIME_DIR" {{ .Values.runtimePackages | join " " }}
-
-mkdir -p /home/node/.openclaw
-sed \
-  -e "s#__GATEWAY_TOKEN__#${GATEWAY_TOKEN}#g" \
-  -e "s#__DISCORD_TOKEN_DGS_OPENCLAW__#${DISCORD_TOKEN_DGS_OPENCLAW}#g" \
-  -e "s#__DISCORD_TOKEN_DGS_CLAUDE__#${DISCORD_TOKEN_DGS_CLAUDE}#g" \
-  /config/openclaw.json.tmpl > /home/node/.openclaw/openclaw.json
-
-# ANTHROPIC_SETUP_TOKEN is consumed directly by `openclaw models auth`, not
-# written into openclaw.json — see README "Claude CLI auth" for the one-time
-# manual step this chart does not automate yet.
+# ANTHROPIC_SETUP_TOKEN is NOT written into openclaw.json. Authenticating the
+# Claude backend is a one-time manual step documented in the repository README
+# under "Claude CLI auth"; the resulting auth profile persists on this PVC.
 
 printf '%s' "$WANT" > "$STAMP"
 echo "openclaw-agent: provision complete"

@@ -19,6 +19,7 @@ spec:
       initContainers:
         - name: provision
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["/bin/sh", "-c"]
           args:
             - {{ include "openclaw-agent.initScript" . | quote }}
@@ -33,6 +34,7 @@ spec:
       containers:
         - name: openclaw
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           command:
             - node
             - /app/dist/index.js
