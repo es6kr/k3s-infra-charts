@@ -58,9 +58,14 @@ data:
             {{- if not $agent }}
             {{- fail (printf "openclaw-agent: discord.accounts has %q but no agent uses it as discord.accountId" $accountName) }}
             {{- end }}
+            {{- $accountConfig := get $.Values.discord.accounts $accountName | default dict }}
+            {{- $accountEnabled := true }}
+            {{- if hasKey $accountConfig "enabled" }}
+            {{- $accountEnabled = $accountConfig.enabled }}
+            {{- end }}
             {{ $accountName | quote }}: {
               "name": {{ $accountName | quote }},
-              "enabled": true,
+              "enabled": {{ $accountEnabled }},
               "token": "__DISCORD_TOKEN_{{ $accountName | upper | replace "-" "_" }}__",
               "allowFrom": ["*"],
               "guilds": {
