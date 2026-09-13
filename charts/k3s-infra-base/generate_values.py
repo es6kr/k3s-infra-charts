@@ -59,6 +59,24 @@ def generate_values(meta: Dict[str, Any]) -> Dict[str, Any]:
     # Ingress-nginx enabled toggle
     ingress_enabled = (ingress_type == "nginx")
 
+    vault_ingress: Dict[str, Any] = {
+        "enabled": True,
+        "ingressClassName": "nginx",
+        "hosts": [
+            {
+                "host": f"vault.{domain}" if domain else "",
+                "paths": ["/"]
+            }
+        ]
+    }
+    if wildcard_tls_secret:
+        vault_ingress["tls"] = [
+            {
+                "secretName": wildcard_tls_secret,
+                "hosts": [f"vault.{domain}" if domain else ""]
+            }
+        ]
+
     values: Dict[str, Any] = {
         "global": {
             "cluster": {
@@ -132,22 +150,7 @@ def generate_values(meta: Dict[str, Any]) -> Dict[str, Any]:
                 "values": {
                     "server": {
                         "ha": {"enabled": False},
-                        "ingress": {
-                            "enabled": True,
-                            "ingressClassName": "nginx",
-                            "hosts": [
-                                {
-                                    "host": f"vault.{domain}" if domain else "",
-                                    "paths": ["/"]
-                                }
-                            ],
-                            "tls": [
-                                {
-                                    "secretName": wildcard_tls_secret,
-                                    "hosts": [f"vault.{domain}" if domain else ""]
-                                }
-                            ]
-                        }
+                        "ingress": vault_ingress
                     },
                     "ui": {"enabled": True},
                     "oidc": {
