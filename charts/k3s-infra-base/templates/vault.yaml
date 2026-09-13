@@ -1,0 +1,1 @@
+{{- include "k3s-infra-base.application" (dict "componentKey" "vault" "root" .) }}

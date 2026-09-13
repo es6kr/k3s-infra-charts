@@ -4,7 +4,7 @@ A Helm chart repository for Kubernetes and K3s infrastructure core components (`
 
 ## Included Charts
 
-- **`k3s-infra-base`**: Umbrella chart rendering ArgoCD Applications for `ingress-nginx`, `cluster-issuers`, `longhorn`, `reflector`, and `cnpg-operator` with single-values `enabled` toggles.
+- **`k3s-infra-base`**: Umbrella chart rendering ArgoCD Applications for `ingress-nginx`, `cluster-issuers`, `longhorn`, `reflector`, `cnpg-operator`, and `vault` with single-values `enabled` toggles.
 - **`cluster-issuers`**: Chart for deploying cert-manager `ClusterIssuers` for Let's Encrypt with global and per-issuer overrides.
 - **`host-ip-service`**: Chart for bridging host-level TCP/HTTP services (e.g., Docker containers running on host IP `10.0.0.36`) into Kubernetes Service/Endpoints and generating corresponding Ingress resources with cert-manager TLS annotations.
 - **`openclaw-agent`**: Chart for running one or more openclaw Discord agents on the unmodified upstream image, with model-provider packages installed into the PVC by an init container (not baked into the image) and config/secrets supplied as Kubernetes ConfigMap/Secret instead of an inline pod-command heredoc. `values.yaml` ships placeholder Discord IDs (`ownerAllowFrom`, `channelId`, `guildId`) — pass the real deployment-specific values via a separate `-f` override file kept outside this repo (they are identifying but not credentials; actual secrets always go through `existingSecret`, never a values file).
@@ -65,7 +65,49 @@ components:
     enabled: true
   cnpg-operator:
     enabled: false
+  vault:
+    enabled: true
+    values:
+      server:
+        ingress:
+          hosts:
+            - host: "vault.example.com"
+              paths: ["/"]
+          tls:
+            - secretName: "wildcard-tls"
+              hosts: ["vault.example.com"]
+      oidc:
+        issuerURL: "https://auth.example.com/application/o/vault/"
+        clientID: "vault-sso"
+        clientSecretRef: "vault-oidc-secret"
 ```
+
+### Dynamic Values Generator (`generate_values.py`)
+
+Clusters can generate their `values.yaml` dynamically from metadata JSON:
+
+```bash
+python3 charts/k3s-infra-base/generate_values.py \
+  --meta cluster-meta.json \
+  --schema charts/k3s-infra-base/values.schema.json \
+  --output values.yaml
+```
+
+**Metadata JSON Schema Reference:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | Yes | Cluster identifier (e.g. `dgs-dev36`) |
+| `ingress` | string | No | Ingress type (`nginx` default) |
+| `externalIPs` | array/string | No | Cluster VIPs / external IPs for ingress service |
+| `domain` | string | No | Base cluster domain name (e.g. `dgs.ai.kr`) |
+| `acmeEmail` | string | No | ACME contact email for Let's Encrypt |
+| `cloudflareSecret` | string | No | Secret holding Cloudflare token (`cloudflare-api-token`) |
+| `nodeCount` | integer | No | Node count for Longhorn replica calculation |
+| `components` | object | No | Component enabled map (e.g. `{"vault": true}`) |
+| `oidc` | object | No | Vault OIDC SSO configuration (`vaultIssuerURL`, `vaultClientID`, `vaultClientSecretRef`) |
+| `wildcardTLSSecret` | string | No | Secret name for wildcard TLS certificate |
+
 
 ## `openclaw-agent` Secrets & Claude CLI auth
 

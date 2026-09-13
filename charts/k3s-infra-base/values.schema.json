@@ -100,6 +100,57 @@
               }
             }
           }
+        },
+        "vault": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "chart": {
+              "type": "object",
+              "properties": {
+                "repoURL": { "type": "string" },
+                "chart": { "type": "string" },
+                "targetRevision": { "type": "string" }
+              }
+            },
+            "namespace": { "type": "string" },
+            "syncWave": { "type": "string" },
+            "values": {
+              "type": "object",
+              "properties": {
+                "server": { "type": "object" },
+                "ui": { "type": "object" },
+                "oidc": {
+                  "type": "object",
+                  "properties": {
+                    "issuerURL": { "type": "string" },
+                    "clientID": { "type": "string" },
+                    "clientSecretRef": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "longhorn": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "chart": { "type": "object" },
+            "namespace": { "type": "string" },
+            "syncWave": { "type": "string" },
+            "values": { "type": "object" }
+          }
+        },
+        "reflector": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "chart": { "type": "object" },
+            "namespace": { "type": "string" },
+            "syncWave": { "type": "string" },
+            "values": { "type": "object" }
+          }
         }
       }
     }
