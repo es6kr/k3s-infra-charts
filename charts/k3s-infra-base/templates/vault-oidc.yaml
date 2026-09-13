@@ -1,0 +1,144 @@
+{{- if and (hasKey .Values "components") (hasKey .Values.components "vault") -}}
+{{- $vault := .Values.components.vault -}}
+{{- if and $vault $vault.enabled -}}
+{{- $oidc := $vault.oidc | default ($vault.values | default dict).oidc -}}
+{{- if and $oidc $oidc.issuerURL -}}
+{{- $namespace := $vault.namespace | default "vault" -}}
+{{- $vaultAddr := $oidc.vaultAddr | default (printf "http://vault.%s.svc.cluster.local:8200" $namespace) -}}
+{{- $clientID := $oidc.clientID | default "vault-sso" -}}
+{{- $clientSecretRef := $oidc.clientSecretRef | default "vault-oidc-secret" -}}
+{{- $clientSecretKey := $oidc.clientSecretKey | default "client-secret" -}}
+{{- $tokenSecretRef := $oidc.tokenSecretRef | default "vault-setup-token" -}}
+{{- $tokenSecretKey := $oidc.tokenSecretKey | default "token" -}}
+{{- $roleName := $oidc.roleName | default "default-reader" -}}
+{{- $userClaim := $oidc.userClaim | default "sub" -}}
+{{- $policies := $oidc.policies | default "default" -}}
+{{- $ttl := $oidc.ttl | default "1h" -}}
+{{- $image := $oidc.image | default "hashicorp/vault:1.20.4" -}}
+{{- $syncWave := $oidc.syncWave | default "5" -}}
+{{- $redirectUris := "" -}}
+{{- if $oidc.allowedRedirectURIs -}}
+  {{- if kindIs "slice" $oidc.allowedRedirectURIs -}}
+    {{- $redirectUris = join "," $oidc.allowedRedirectURIs -}}
+  {{- else -}}
+    {{- $redirectUris = $oidc.allowedRedirectURIs -}}
+  {{- end -}}
+{{- else -}}
+  {{- $hosts := dig "values" "server" "ingress" "hosts" (list) $vault -}}
+  {{- if and $hosts (gt (len $hosts) 0) -}}
+    {{- $primaryHost := (index $hosts 0).host -}}
+    {{- if $primaryHost -}}
+      {{- $redirectUris = printf "https://%s/ui/vault/auth/oidc/oidc/callback,http://localhost:8250/oidc/callback" $primaryHost -}}
+    {{- else -}}
+      {{- $redirectUris = "http://localhost:8250/oidc/callback" -}}
+    {{- end -}}
+  {{- else -}}
+    {{- $redirectUris = "http://localhost:8250/oidc/callback" -}}
+  {{- end -}}
+{{- end -}}
+{{- if and $oidc.createSecret $oidc.clientSecret }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $clientSecretRef }}
+  namespace: {{ $namespace }}
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: {{ $syncWave | quote }}
+type: Opaque
+stringData:
+  client-id: {{ $clientID | quote }}
+  client-secret: {{ $oidc.clientSecret | quote }}
+  issuer: {{ $oidc.issuerURL | quote }}
+---
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-oidc-setup-script
+  namespace: {{ $namespace }}
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: {{ $syncWave | quote }}
+data:
+  setup-oidc.sh: |
+    #!/bin/sh
+    set -e
+    echo "Enabling OIDC Auth Method in Vault..."
+    vault auth enable oidc || true
+
+    echo "Configuring OIDC Provider settings..."
+    vault write auth/oidc/config \
+      oidc_discovery_url={{ $oidc.issuerURL | quote }} \
+      oidc_client_id={{ $clientID | quote }} \
+      oidc_client_secret="$VAULT_OIDC_CLIENT_SECRET" \
+      default_role={{ $roleName | quote }}
+
+    echo "Creating OIDC role {{ $roleName }}..."
+    vault write auth/oidc/role/{{ $roleName }} \
+      bound_audiences={{ $clientID | quote }} \
+      allowed_redirect_uris={{ $redirectUris | quote }} \
+      user_claim={{ $userClaim | quote }} \
+      policies={{ $policies | quote }} \
+      ttl={{ $ttl | quote }}
+---
+# Pre-requisites & Ordering Constraints:
+# 1. Vault must be initialized and unsealed before this Job runs.
+# 2. VAULT_TOKEN secret (default: 'vault-setup-token') must exist and contain a valid token.
+# 3. Authentik / OIDC IdP (discovery URL) must be reachable from the pod, or the Job will fail.
+# 4. backoffLimit: 3 ensures transient failures retry without infinite loops.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vault-oidc-setup
+  namespace: {{ $namespace }}
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: {{ $syncWave | quote }}
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: setup-oidc
+          image: {{ $image }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              sh /vault-config/setup-oidc.sh
+          env:
+            - name: VAULT_ADDR
+              value: {{ $vaultAddr | quote }}
+            - name: VAULT_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $clientSecretRef }}
+                  key: {{ $clientSecretKey }}
+            - name: VAULT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $tokenSecretRef }}
+                  key: {{ $tokenSecretKey }}
+          volumeMounts:
+            - name: setup-script
+              mountPath: /vault-config
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: setup-script
+          configMap:
+            name: vault-oidc-setup-script
+{{- end }}
+{{- end }}
+{{- end }}

@@ -25,6 +25,8 @@ jobs:
           helm lint charts/host-ip-service
           helm lint charts/cluster-issuers
           helm lint charts/openclaw-agent
+          helm lint charts/k3s-infra-base -f charts/k3s-infra-base/tests/daegunsoftDev-dev36-values.yaml
+          helm lint charts/k3s-infra-base -f charts/k3s-infra-base/tests/es6kr-oci-values.yaml
 
   unittest:
     runs-on: ubuntu-latest
@@ -35,6 +37,17 @@ jobs:
         uses: azure/setup-helm@v4
         with:
           version: v3.14.0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip install jsonschema pyyaml
+
+      - name: Run k3s-infra-base Python unit tests
+        run: python3 charts/k3s-infra-base/tests/test_generate_values.py
 
       - name: Install helm-unittest plugin
         run: helm plugin install https://github.com/helm-unittest/helm-unittest.git --version v0.5.2
@@ -54,6 +67,20 @@ jobs:
         with:
           version: v3.14.0
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip install jsonschema pyyaml
+
+      - name: Validate k3s-infra-base dynamic values generator
+        run: |
+          python3 charts/k3s-infra-base/generate_values.py \
+            --meta charts/k3s-infra-base/tests/sample-meta-dev36.json \
+            --schema charts/k3s-infra-base/values.schema.json
+
       - name: Template host-ip-service chart
         run: |
           helm template test-release charts/host-ip-service \
@@ -65,3 +92,15 @@ jobs:
 
       - name: Template openclaw-agent chart
         run: helm template test-release charts/openclaw-agent
+
+      - name: Template k3s-infra-base chart
+        run: |
+          helm template test-release charts/k3s-infra-base \
+            -f charts/k3s-infra-base/tests/daegunsoftDev-dev36-values.yaml
+          helm template test-release charts/k3s-infra-base \
+            -f charts/k3s-infra-base/tests/es6kr-oci-values.yaml
+          helm template test-vault-oidc charts/k3s-infra-base \
+            -f charts/k3s-infra-base/tests/daegunsoftDev-dev36-values.yaml \
+            --set 'components.vault.enabled=true' \
+            --set 'components.vault.values.oidc.issuerURL=https://auth.dgs.ai.kr/application/o/vault/' \
+            --set 'components.vault.values.oidc.clientID=vault-sso'

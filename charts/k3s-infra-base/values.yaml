@@ -95,4 +95,8 @@ components:
       oidc:
         issuerURL: ""                         # 오버라이드: Authentik OIDC issuer URL
         clientID: ""                          # 오버라이드: Vault OIDC Client ID
-        clientSecretRef: ""                   # 오버라이드: K8s Secret name for client secret
+        clientSecretRef: ""                   # 오버라이드: K8s Secret name for client secret (default: vault-oidc-secret)
+        clientSecretKey: "client-secret"      # 오버라이드: Secret key for client secret
+        tokenSecretRef: "vault-setup-token"   # 오버라이드: K8s Secret name for Vault setup token
+        tokenSecretKey: "token"               # 오버라이드: Secret key for Vault setup token
+        roleName: "default-reader"            # 오버라이드: Vault OIDC role name

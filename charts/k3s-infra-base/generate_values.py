@@ -2,6 +2,21 @@
 """
 k3s-infra-base Helm Chart Dynamic Values Generator & Schema Validator
 Generates cluster-specific values.yaml from cluster metadata JSON and validates against values.schema.json.
+
+Metadata JSON Schema:
+  - name (str, required): Cluster name / identifier (e.g. "dgs-dev36")
+  - ingress (str, optional): Ingress controller type, "nginx" (default) or other
+  - externalIPs (list[str] | str, optional): External IPs / cluster VIPs for ingress controller service
+  - domain (str, optional): Root domain name (e.g. "dgs.ai.kr")
+  - acmeEmail (str, optional): ACME registration email for Let's Encrypt
+  - cloudflareSecret (str, optional): Secret name holding Cloudflare API token (default: "cloudflare-api-token")
+  - nodeCount (int, optional): Number of nodes in cluster, used to calculate Longhorn replicas (default: 1)
+  - components (dict[str, bool], optional): Component enabled toggles (e.g. {"vault": true, "cnpg-operator": true})
+  - oidc (dict | None, optional): OIDC configuration for Vault SSO
+      - vaultIssuerURL (str): Authentik/IdP OIDC discovery/issuer URL
+      - vaultClientID (str): OIDC client ID for Vault
+      - vaultClientSecretRef (str): Name of K8s Secret containing client secret (default: "vault-oidc-secret")
+  - wildcardTLSSecret (str | None, optional): Name of K8s Secret containing wildcard TLS certificate
 """
 
 import json
@@ -20,14 +35,23 @@ def generate_values(meta: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("Metadata field 'name' is required.")
 
     ingress_type = meta.get("ingress", "nginx")
-    external_ips = meta.get("externalIPs", [])
+    raw_external_ips = meta.get("externalIPs", [])
+    if isinstance(raw_external_ips, str):
+        external_ips = [raw_external_ips] if raw_external_ips else []
+    elif isinstance(raw_external_ips, list):
+        external_ips = raw_external_ips
+    elif raw_external_ips is None:
+        external_ips = []
+    else:
+        external_ips = [str(raw_external_ips)]
+
     domain = meta.get("domain", "")
     acme_email = meta.get("acmeEmail", "")
     cloudflare_secret = meta.get("cloudflareSecret", "cloudflare-api-token")
     node_count = meta.get("nodeCount", 1)
-    custom_components = meta.get("components", {})
-    oidc = meta.get("oidc", {})
-    wildcard_tls_secret = meta.get("wildcardTLSSecret", "")
+    custom_components = meta.get("components") or {}
+    oidc = meta.get("oidc") or {}
+    wildcard_tls_secret = meta.get("wildcardTLSSecret") or ""
 
     # Calculate longhorn replicaCount = min(nodeCount, 3)
     longhorn_replicas = min(max(int(node_count), 1), 3)
@@ -47,7 +71,7 @@ def generate_values(meta: Dict[str, Any]) -> Dict[str, Any]:
                 "values": {
                     "controller": {
                         "service": {
-                            "externalIPs": external_ips if ingress_enabled else ["100.64.0.1"]
+                            "externalIPs": external_ips if (ingress_enabled and external_ips) else ["100.64.0.1"]
                         }
                     }
                 }
@@ -97,6 +121,10 @@ def generate_values(meta: Dict[str, Any]) -> Dict[str, Any]:
             },
             "cnpg-operator": {
                 "enabled": custom_components.get("cnpg-operator", False),
+                "syncOptions": [
+                    "ServerSideApply=true",
+                    "CreateNamespace=true"
+                ],
                 "values": {}
             },
             "vault": {
