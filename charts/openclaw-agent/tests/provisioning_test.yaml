@@ -173,3 +173,21 @@ tests:
     asserts:
       - failedTemplate:
           errorMessage: 'openclaw-agent: discord.accounts has "orphan-account" but no agent uses it as discord.accountId'
+
+  - it: discord account enabled flag is rendered from values when false
+    template: configmap.yaml
+    set:
+      discord:
+        guildId: "000000000000000002"
+        accounts:
+          dgs-openclaw:
+            enabled: true
+          dgs-claude:
+            enabled: false
+    asserts:
+      - matchRegex:
+          path: data["openclaw.json.tmpl"]
+          pattern: '(?s)"dgs-claude".*?"enabled": false'
+      - matchRegex:
+          path: data["openclaw.json.tmpl"]
+          pattern: '(?s)"dgs-openclaw".*?"enabled": true'

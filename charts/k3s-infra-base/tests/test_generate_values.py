@@ -30,7 +30,18 @@ class TestGenerateValues(unittest.TestCase):
         self.assertEqual(vault_values["oidc"]["issuerURL"], "")
         self.assertEqual(vault_values["oidc"]["clientID"], "")
         self.assertEqual(vault_values["oidc"]["clientSecretRef"], "vault-oidc-secret")
-        self.assertEqual(vault_values["server"]["ingress"]["tls"][0]["secretName"], "")
+        self.assertNotIn("tls", vault_values["server"]["ingress"])
+
+    def test_vault_ingress_tls_omitted_when_no_wildcard_secret(self):
+        """Test that Vault ingress TLS block is omitted when wildcardTLSSecret is absent or empty."""
+        meta = {
+            "name": "test-cluster",
+            "domain": "example.com",
+            "components": {"vault": True},
+        }
+        values = generate_values.generate_values(meta)
+        vault_ingress = values["components"]["vault"]["values"]["server"]["ingress"]
+        self.assertNotIn("tls", vault_ingress)
 
     def test_scalar_external_ips(self):
         """Test that scalar externalIPs string gets wrapped into a list."""
